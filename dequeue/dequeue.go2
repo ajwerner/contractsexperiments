@@ -1,0 +1,297 @@
+// Package dequeue is an experiment using the July 2019 contracts proposal to
+// create a generic, pooled allocation dequeue.
+package dequeue
+
+// Dequeue is a double-ended queue.
+// It offers pushing, popping, and peeking from the front and the back in O(1).
+type Dequeue(type T) struct {
+	len        int
+	head, tail *node(T)
+	nodePool   *nodePool(T)
+}
+
+// Init initializes a new Dequeue which uses internally is a linked of ring
+// buffers which internally contain slices of T values of the provided bufSize.
+func (d *Dequeue(T)) Init(bufSize int) {
+	*d = Dequeue{
+		nodePool: getOrCreateNodePool(T)(bufSize),
+	}
+}
+
+// AllocFront allocates a new element at the front of the Dequeue and returns
+// its address.
+func (d *Dequeue(T)) AllocFront() *T {
+	if d.head == nil {
+		// initialize
+		d.head = d.nodePool.get()
+		d.tail = d.head
+	}
+	if d.head.full() {
+		// add new head
+		newHead := d.nodePool.get()
+		newHead.next = d.head
+		d.head.prev = newHead
+		d.head = newHead
+	}
+	return d.head.allocFront()
+}
+
+// AllocBack allocates a new element at the back of the Dequeue and returns
+// its address.
+func (d *Dequeue(T)) AllocBack() *T {
+	if d.head == nil {
+		// initialize
+		d.head = d.nodePool.get()
+		d.tail = d.head
+	}
+	if d.tail.full() {
+		// add new tail
+		newTail := d.nodePool.get()
+		newTail.prev = d.tail
+		d.tail.next = newTail
+		d.tail = newTail
+	}
+	return d.tail.allocBack()
+}
+
+// PushFront inserts the value t at the front of the dequeue.
+func (d *Dequeue(T)) PushFront(t T) {	
+	*d.AllocFront() = t 
+}
+
+// PushFront inserts the value t at the back of the dequeue.
+func (d *Dequeue(T)) PushBack(t T) {
+	*d.AllocBack() = t
+}
+
+// PopFront removes the front element from the dequeue and returns its value.
+func (d *Dequeue(T)) PopFront() T {
+	ret := *d.PeekFront()
+	d.removeFront()
+	return ret
+}
+
+// PopBack removes the last element from the dequeue and returns its value.
+func (d *Dequeue(T)) PopBack() T {
+	ret := *d.PeekBack()
+	d.removeBack()
+	return ret
+}
+
+func (d *Dequeue(T)) removeFront() {
+	if d.head == nil {
+		panic("removeBack: empty Dequeue")
+	}
+	d.head.removeFront()
+	if d.front.len == 0 {
+		oldHead := d.head
+		d.head = oldHead.next
+		d.nodePool.put(oldHead)
+	}
+}
+
+func (d *Dequeue(T)) removeBack() {
+	if d.tail == nil {
+		panic("removeBack: empty Dequeue")
+	}
+	d.tail.removeBack()
+	if d.tail.len == 0 {
+		oldTail := d.tail
+		d.tail = oldTail.prev
+		d.nodePool.put(oldTail)
+	}
+}
+
+type node(type T) struct {
+	ringBuf(T)
+	next, prev *node(T)
+}
+
+type ringBuf(type T) struct {
+	head, len int
+	buf []T
+}
+
+func (n *ringBuf(T)) at(idx int) *T {
+	if idx >= rb.len {
+		panic(fmt.Errorf("index out of range %d >= %d", idx, rb.len))
+	}
+	return rb.buf[rb.head+idx%len(rb.buf)]
+}
+
+func (n *ringBuf(T)) allocFront() *T {
+	if rb.len == len(rb.buf) {
+		panic("cannot alloc from full node")
+	}
+	if rb.head--; rb.head < 0 {
+		rb.head = len(rb.buf)-1
+	}
+	rb.len++
+	return rb.peekFront()
+}
+
+func (rb *ringBuf(T)) allocBack() *T {
+	if rb.len == len(rb.buf) {
+		panic("cannot alloc from full node")
+	}
+	if rb.head++; rb.head == rb.len {
+		rb.head = 0
+	}
+	rb.len++
+	return rb.peekBack()
+}
+
+func (rb *ringBuf(T)) peekFront() *T {
+	return rb.at(0)
+}
+
+func (rb *ringBuf(T)) peekBack() *T {
+	return rb.at(rb.len-1)	
+}
+
+func (rb *ringBuf(T)) removeFront() (ret T) {
+	if rb.len == 0 {
+		panic("cannot pop from empty node")
+	}
+	ret, *front = *front, func() (t T) { return t }()
+	if rb.head++; rb.head == rb.len {
+		rb.head = 0
+	}
+	rb.len--
+	return ret
+}
+
+func (rb *ringBuf(T)) removeBack() T {
+	if rb.len == 0 {
+		panic("cannot pop from empty node")
+	}
+	ret, *back = *back, func() (t T) { return t }()
+	rb.len--
+}
+
+func (rb *ringBuf(T)) clear() {
+	for rb.len > 0 {
+		rb.popBack()
+	}
+}
+
+type Iterator(type T) struct {
+	d       *Dequeue(T)
+	cur     *node(T)
+	offset  int
+}
+
+// InitFront initializes the iterator to the head of the Dequeue.
+func (it *Iterator(T)) InitFront(d *Dequeue(T)) (ok bool) {
+	if d.head == nil {
+		return false
+	}
+	*it = Iterator(T){
+		d:      d,
+		cur:    d.head,
+		offset: 0,
+	}
+	return true
+}
+
+// InitBack initializes the iterator to the tail of the Dequeue.
+func (it *Iterator(T)) InitFront(d *Dequeue(T)) (ok bool) {
+	if d.tail == nil {
+		return false
+	}
+	*it = Iterator(T){
+		d:      d,
+		cur:    d.tail,
+		offset: d.tail.len-1,
+	}
+	return true
+}
+
+// Next progresses the iterator forward if it is not already at the front.
+func (it *Iterator(T)) Next() (ok bool) {
+	if it.cur == nil {
+		return false
+	}
+	it.offset++
+	if it.offset == it.cur.len {
+		if it.cur.next != nil {
+			it.cur = it.cur.next
+			it.offset = 0
+		} else {
+			return false
+		}
+	}
+	return true
+}
+
+// Prev progresses the iterator backwards if it is not already at the back.
+func (it *Iterator(T)) Prev() (ok bool) {
+	if it.cur == nil {
+		return false
+	}
+	it.offset--
+	if it.offset == 0 {
+		if it.cur.prev != nil {
+			it.cur = it.cur.prev
+			it.offset = it.cur.len-1
+		} else {
+			return false
+		}
+	}
+	return true
+}
+
+func (it *Iterator(T)) Cur() *T {
+	if it.cur == nil || it.offset >= it.cur.len || it.cur.len == 0 {
+		panic("cannot read from invalid iterator")
+	}
+	return it.cur.at(it.offset)
+}
+
+// Each Dequeue carries a reference to a node pool which is a global sync pool
+// for nodes of a given element type and buffer size.
+var nodePoolMap = struct {
+	sync.Mutex
+	m map[nodePoolKey]interface{}
+}{
+	m: map[nodePoolKey]interface{},
+}
+
+// nodePoolKey is used to key into nodePoolMap.
+type nodePoolKey struct {
+	typeT   reflect.Type
+	bufSize int
+}
+
+func getOrCreateNodePool(type T)(bufSize int) *nodePool(T) {
+	var ptrT *T
+	typeT := reflect.TypeOf(ptrT).Elem()
+	key := nodePoolKey{typeT: typeT, bufSize: bufSize}
+	nodePoolMap.Lock()
+	defer nodePoolMap.Unlock()
+	if np, ok := nodePoolMap.m[key]; ok {
+		return np.(*nodePool(T))
+	}
+	np := &nodePool(T){
+		poll: sync.Pool{
+			New: func() interface{} { 
+				node := new(node(T))
+				node.buf = make([]T, bufSize)
+			},
+		}
+	}
+	nodePoolMap.m[key] = np
+	return np
+}
+
+type nodePool(type T) struct {
+	pool sync.Pool
+}
+
+func (np *nodePool(T)) get() node(T) {
+	return np.pool.Get().(*node(T))
+}
+
+func (np *nodePool(T)) put(n *node(T)) {
+	np.pool.Put(n)
+}
