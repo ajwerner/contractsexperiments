@@ -2,6 +2,11 @@
 // create a generic, pooled allocation dequeue.
 package dequeue
 
+import (
+       "sync"
+       "reflect"
+)
+
 // Dequeue is a double-ended queue.
 // It offers pushing, popping, and peeking from the front and the back in O(1).
 type Dequeue(type T) struct {
@@ -195,7 +200,7 @@ func (it *Iterator(T)) InitFront(d *Dequeue(T)) (ok bool) {
 }
 
 // InitBack initializes the iterator to the tail of the Dequeue.
-func (it *Iterator(T)) InitFront(d *Dequeue(T)) (ok bool) {
+func (it *Iterator(T)) InitBack(d *Dequeue(T)) (ok bool) {
 	if d.tail == nil {
 		return false
 	}
@@ -254,7 +259,7 @@ var nodePoolMap = struct {
 	sync.Mutex
 	m map[nodePoolKey]interface{}
 }{
-	m: map[nodePoolKey]interface{},
+	m: map[nodePoolKey]interface{}{},
 }
 
 // nodePoolKey is used to key into nodePoolMap.
@@ -278,7 +283,7 @@ func getOrCreateNodePool(type T)(bufSize int) *nodePool(T) {
 				node := new(node(T))
 				node.buf = make([]T, bufSize)
 			},
-		}
+		},
 	}
 	nodePoolMap.m[key] = np
 	return np
